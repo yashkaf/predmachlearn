@@ -1,0 +1,69 @@
+---
+title: "Predictive Modeling of Weight Lifting Exercises"
+author: "Yakov Falkovich"
+date: "Saturday, October 24, 2015"
+output: html_document
+---
+
+## Qualitative Analysis of Exercise
+The goal of this exercise is to classify weight lifting exercises preformed by different people into one of five types based on mistakes in exercise form. The data comes from wearable devices worn on different parts of the body. The five types refer to distinct movement categories and not to a discretization of any continuous measure. Thus, the models that I expect to give the best results are classification models (as opposed to regression models). 
+
+The five categories refer to different body parts (i.e. Class E = "throwing the hips") and thus each type could be classified based on a specific group of body part variables. This encourages the use of tree models, I have decided to try both regular trees and random forest. Another quality of the data is the large number of observations (19,622) which can lead to strong results using a model like k nearest neighbors (since the distribution of observation is very dense with no sparse spots).
+
+```{r echo=FALSE}
+library(caret);
+library(ggplot2);
+library(rattle);
+```
+
+## Basic Preprocessing
+The data contains 160 variables, but many of them have missing values. We can reduce the number of relevant variables by excludes those with zero or near zero variance in either the training or the testing sets. 
+
+```{r}
+# Loading the data
+trainraw=read.csv("pml-training.csv",header=T,sep=",")
+testraw=read.csv("pml-testing.csv",header=T,sep=",")
+
+# Removing zero variance variables
+zvtest=nearZeroVar(testraw,saveMetrics=T)
+zvtrain=nearZeroVar(trainraw,saveMetrics=T)
+nzvs=zvtest[,3] | zvtest[,4] | zvtrain[,3] | zvtest[,4]
+training=trainraw[,nzvs==F]
+testing=testraw[,nzvs==F]
+
+# The first six variables are irrelevant to prediction (e.g. name of participant)
+training=training[7:59]
+```
+
+## Exploratory PCA
+We are down to 52 predictor variables from 159, but it is still worth it to check whether the number of variables can be significantly reduced via PCA. We don't a lot of variables to be strongly correlated since each one refers to different motions (e.g. rolling vs. accelerating) or different body parts. Still, if PCA shows that almost the entire variance can be explained by only a few components it could worth trying a simple model with only those few.  
+
+```{r echo=FALSE}
+fullpc=princomp(~. -classe,data=training,cor=T,scale=T)
+propvar=fullpc$sdev^2/52
+qplot(x=1:52,y=propvar,size=3)+geom_abline(intercept=0,slope=0,color="red",size=2,alpha=0.5)+geom_abline(int=1/52,slo=0,color="blue",size=2,alpha=0.5)+annotate("text",x=26,y=.025,label="average component variance")+theme(legend.position="none")+labs(title="PCA Proportion of Variance",x="# of Component",y="Proportion of Total Variance")
+```
+
+PCA shows that most components contribute above zero variance, this is certainly true of the original variables so we should stick with them.
+
+## Tree Model
+I attempted to fit two tree models, one using the default parameters and one with a lower Complexity Parameter to increase the depth of the tree.  
+```{r}
+tremod1=train(classe~.,data=training,method="rpart")
+tremod2=train(classe~.,data=training,method="rpart",cp=0.005)
+```
+
+Unfortunately, even the second model achieves a very poor accuracy of `r mean(tremod2$resample[,1])`. As we can see in a plot of the tree, it does not even classify any observation into class D:  
+```{r echo=FALSE}
+fancyRpartPlot(tremod2$finalModel)
+```
+
+The failure of a simple tree model is likely due to the large number of variables, and the correct classification depending on complex interactions between them.
+
+## Random Forest
+By trying different combinations of variables, a random forest model can overcome the problems that plagued a simple tree.  
+
+```{r}
+rfmod=train(classe~.,data=training,method="rf")
+print(rfmod$finalModel)
+```
